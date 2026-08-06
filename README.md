@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Demo mode uses in-memory seeded data (your car/education loans, EF ₹24k→₹3L, SIP ₹6k, home contribution ₹20k).
+Open [http://localhost:3000](http://localhost:3000). Demo mode uses in-memory seeded data.
 
 ## Production (Neon + Google)
 
