@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Finance OS
 
-## Getting Started
+Personal finance operating system — salary, expenses, loans, investments, emergency fund, goals, net worth, reports, and insights.
 
-First, run the development server:
+## Quick start (demo mode)
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). Demo mode uses in-memory seeded data (your car/education loans, EF ₹24k→₹3L, SIP ₹6k, home contribution ₹20k).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Production (Neon + Google)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Copy `.env.example` → `.env.local`
+2. Set `DATABASE_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `ALLOWED_EMAIL`
+3. Set `DEMO_MODE=false`
+4. `npm run db:push` then `npm run db:seed`
+5. `npm run dev`
 
-## Learn More
+## Scripts
 
-To learn more about Next.js, take a look at the following resources:
+| Script            | Purpose                     |
+| ----------------- | --------------------------- |
+| `npm run dev`     | Dev server                  |
+| `npm run build`   | Production build            |
+| `npm test`        | Finance engine unit tests   |
+| `npm run db:push` | Push Drizzle schema to Neon |
+| `npm run db:seed` | Seed expense categories     |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Stack
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Next.js 15 · React 19 · Tailwind · shadcn-style UI · Drizzle · Neon · Auth.js · Recharts · Zustand · TanStack Table · Framer Motion · Zod
 
-## Deploy on Vercel
+## Future scope
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Bank / UPI account sync (Open Banking / aggregator APIs)
+- Live mutual fund NAV and crypto price updates
+- Broker / demat portfolio import (Zerodha, Groww, etc.)
+- Multi-currency support with FX conversion
+- Shared household / family access (multi-user)
+- Push and email reminders (EMI, SIP, salary day)
+- Tax helpers (80C, capital gains summaries)
+- WhatsApp or Telegram notification bots
+- Recurring expense auto-generation from rules
+- Debt payoff strategies (avalanche vs snowball simulator)
+- Scenario planning (“what if I invest ₹X more?”)
+- Receipt OCR / photo expense capture
+- Native iOS / Android wrappers beyond PWA
+- Offline write queue with sync when back online
+- Automated monthly report emails + richer PDF layouts
+- Budget caps per category with overspend alerts
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Thanks for visiting this repo
