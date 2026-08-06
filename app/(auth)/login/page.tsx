@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { isDemoMode } from "@/lib/demo-flag";
+import { signIn } from "@/lib/auth";
 
 export default function LoginPage() {
   const demo = isDemoMode();
@@ -27,7 +28,12 @@ export default function LoginPage() {
             </Button>
           </div>
         ) : (
-          <form action="/api/auth/signin/google" method="POST">
+          <form
+            action={async () => {
+              "use server";
+              await signIn("google", { redirectTo: "/dashboard" });
+            }}
+          >
             <Button type="submit" className="w-full">
               Continue with Google
             </Button>
