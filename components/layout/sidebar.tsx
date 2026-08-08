@@ -4,15 +4,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { mainNav } from "./nav";
+import { Command } from "lucide-react";
+import { LogoutButton } from "./logout-button";
 
 export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="hidden md:flex md:w-60 md:flex-col md:border-r md:border-border/60 md:bg-card/40">
+    <aside className="hidden h-dvh shrink-0 md:flex md:w-60 md:flex-col md:border-r md:border-border/60 md:bg-card/40">
       <div className="flex h-14 items-center gap-2 border-b border-border/60 px-5">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/20 text-xs font-bold text-primary">
-          ₹
+        <div className="flex size-9 items-center justify-center rounded-lg border border-primary/25 bg-gradient-to-b from-primary/25 to-primary/5 shadow-[0_0_40px_-12px_rgba(91,141,239,0.55)]">
+          <span className="text-xl font-semibold tracking-tight text-primary">
+            ₹
+          </span>
         </div>
         <div>
           <p className="text-sm font-semibold tracking-tight">Finance OS</p>
@@ -23,7 +27,8 @@ export function Sidebar() {
       </div>
       <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">
         {mainNav.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "/");
+          const active =
+            pathname === item.href || pathname.startsWith(item.href + "/");
           const Icon = item.icon;
           return (
             <Link
@@ -42,9 +47,15 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="border-t border-border/60 p-4 text-xs text-muted-foreground">
-        Press <kbd className="rounded border border-border bg-background px-1.5 py-0.5">⌘K</kbd>{" "}
-        for commands
+      <div className="space-y-2 border-t border-border/60 p-3">
+        <LogoutButton />
+        <p className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
+          Press{" "}
+          <span className="inline-flex items-center gap-0.5 rounded-md border border-border px-1.5 py-0.5">
+            <Command className="size-3" /> K
+          </span>{" "}
+          for commands
+        </p>
       </div>
     </aside>
   );

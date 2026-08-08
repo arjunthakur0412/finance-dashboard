@@ -4,18 +4,17 @@ import { MetricCard } from "@/components/feedback/metric-card";
 import { AllocationDonut } from "@/components/charts";
 import { getInvestments } from "@/features/dashboard/queries";
 import { formatINR } from "@/lib/money";
-import { isDemoMode } from "@/lib/demo-flag";
 import { InvestmentForm } from "@/features/investments/investment-form";
 import { Badge } from "@/components/ui/badge";
 
 export const metadata = { title: "Investments" };
 
-export default function InvestmentsPage() {
-  const data = getInvestments();
+export default async function InvestmentsPage() {
+  const data = await getInvestments();
 
   return (
     <>
-      <Topbar title="Investments" demo={isDemoMode()} />
+      <Topbar title="Investments" />
       <div className="space-y-6 p-4 md:p-6">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard title="Total invested" valuePaise={data.totalInvested} formatCompact />

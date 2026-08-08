@@ -1,6 +1,5 @@
 import { Topbar } from "@/components/layout/topbar";
 import { getSettings, getCashAccounts, getRecurringRules } from "@/features/dashboard/queries";
-import { isDemoMode } from "@/lib/demo-flag";
 import { SettingsForm } from "@/features/settings/settings-form";
 import { ExportImport } from "@/features/settings/export-import";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,14 +8,14 @@ import { CashAccountForm } from "@/features/settings/cash-account-form";
 
 export const metadata = { title: "Settings" };
 
-export default function SettingsPage() {
-  const settings = getSettings();
-  const accounts = getCashAccounts();
-  const recurring = getRecurringRules();
+export default async function SettingsPage() {
+  const settings = await getSettings();
+  const accounts = await getCashAccounts();
+  const recurring = await getRecurringRules();
 
   return (
     <>
-      <Topbar title="Settings" demo={isDemoMode()} />
+      <Topbar title="Settings" />
       <div className="space-y-6 p-4 md:p-6">
         <SettingsForm settings={settings} />
         <Card>

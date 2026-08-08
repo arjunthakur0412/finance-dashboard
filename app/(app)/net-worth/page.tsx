@@ -4,16 +4,15 @@ import { MetricCard } from "@/components/feedback/metric-card";
 import { MoneyAreaChart } from "@/components/charts";
 import { getNetWorthSeries } from "@/features/dashboard/queries";
 import { formatINR } from "@/lib/money";
-import { isDemoMode } from "@/lib/demo-flag";
 
 export const metadata = { title: "Net Worth" };
 
-export default function NetWorthPage() {
-  const { current, series, monthlyChange } = getNetWorthSeries();
+export default async function NetWorthPage() {
+  const { current, series, monthlyChange } = await getNetWorthSeries();
 
   return (
     <>
-      <Topbar title="Net Worth" demo={isDemoMode()} />
+      <Topbar title="Net Worth" />
       <div className="space-y-6 p-4 md:p-6">
         <div className="grid gap-4 sm:grid-cols-3">
           <MetricCard title="Current net worth" valuePaise={current.netWorth} formatCompact />

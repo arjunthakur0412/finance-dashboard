@@ -1,5 +1,22 @@
-import { format, startOfMonth, subMonths } from "date-fns";
-import { getStore } from "@/lib/db/memory";
+import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { endOfMonth, format, startOfMonth, subMonths } from "date-fns";
+import { requireDb } from "@/lib/db";
+import { requireUserId } from "@/lib/session";
+import {
+  cashAccounts,
+  emergencyFund,
+  expenseCategories,
+  expenses,
+  goals,
+  investments,
+  loanPayments,
+  loans,
+  notifications,
+  recurringRules,
+  salaryEntries,
+  settings,
+  netWorthSnapshots,
+} from "@/lib/db/schema";
 import {
   calculateHealthScore,
   ratioBps,
@@ -15,82 +32,154 @@ export function monthKey(date = new Date()) {
   return format(startOfMonth(date), "yyyy-MM-dd");
 }
 
+/** Inclusive start/end dates for a month key like `2026-06-01`. */
+function monthBounds(monthStartIso: string) {
+  const d = new Date(monthStartIso);
+  return {
+    start: format(startOfMonth(d), "yyyy-MM-dd"),
+    end: format(endOfMonth(d), "yyyy-MM-dd"),
+  };
+}
+
 function salaryTotal(s: { basePaise: number; bonusPaise: number; otherPaise: number }) {
   return s.basePaise + s.bonusPaise + s.otherPaise;
 }
 
-export function getDashboardSummary(month = monthKey()) {
-  const store = getStore();
-  const prevMonth = monthKey(subMonths(new Date(month), 1));
+function emptyEmergency(userId: string) {
+  return {
+    userId,
+    currentPaise: 0,
+    targetPaise: 30000000,
+    phase2TargetPaise: 45000000,
+    monthlyContributionPaise: 0,
+    updatedAt: new Date(),
+  };
+}
 
-  const salary = store.salaryEntries.find((s) => s.month === month);
-  const prevSalary = store.salaryEntries.find((s) => s.month === prevMonth);
+export async function getDashboardSummary(month = monthKey()) {
+  const db = requireDb();
+  const userId = await requireUserId();
+  const prevMonth = monthKey(subMonths(new Date(month), 1));
+  const { start: monthStart, end: monthEnd } = monthBounds(month);
+  const { start: prevStart, end: prevEnd } = monthBounds(prevMonth);
+
+  const [
+    salaryRows,
+    prevSalaryRows,
+    monthExpenseRows,
+    prevExpenseRows,
+    accounts,
+    investmentRows,
+    loanRows,
+    efRows,
+    goalRows,
+    categoryRows,
+    recurring,
+  ] = await Promise.all([
+    db.select().from(salaryEntries).where(and(eq(salaryEntries.userId, userId), eq(salaryEntries.month, month))),
+    db.select().from(salaryEntries).where(and(eq(salaryEntries.userId, userId), eq(salaryEntries.month, prevMonth))),
+    db
+      .select()
+      .from(expenses)
+      .where(
+        and(
+          eq(expenses.userId, userId),
+          gte(expenses.date, monthStart),
+          lte(expenses.date, monthEnd)
+        )
+      ),
+    db
+      .select()
+      .from(expenses)
+      .where(
+        and(
+          eq(expenses.userId, userId),
+          gte(expenses.date, prevStart),
+          lte(expenses.date, prevEnd)
+        )
+      ),
+    db.select().from(cashAccounts).where(eq(cashAccounts.userId, userId)),
+    db.select().from(investments).where(eq(investments.userId, userId)),
+    db.select().from(loans).where(eq(loans.userId, userId)),
+    db.select().from(emergencyFund).where(eq(emergencyFund.userId, userId)).limit(1),
+    db.select().from(goals).where(eq(goals.userId, userId)),
+    db.select().from(expenseCategories).orderBy(expenseCategories.sortOrder),
+    db.select().from(recurringRules).where(eq(recurringRules.userId, userId)),
+  ]);
+
+  const salary = salaryRows[0];
+  const prevSalary = prevSalaryRows[0];
   const income = salary ? salaryTotal(salary) : 0;
   const prevIncome = prevSalary ? salaryTotal(prevSalary) : 0;
+  const expensesTotal = monthExpenseRows.reduce((s, e) => s + e.amountPaise, 0);
+  const prevExpensesTotal = prevExpenseRows.reduce((s, e) => s + e.amountPaise, 0);
 
-  const monthPrefix = month.slice(0, 7);
-  const prevPrefix = prevMonth.slice(0, 7);
-
-  const monthExpenses = store.expenses.filter((e) => e.date.startsWith(monthPrefix));
-  const prevExpenses = store.expenses.filter((e) => e.date.startsWith(prevPrefix));
-  const expensesTotal = monthExpenses.reduce((s, e) => s + e.amountPaise, 0);
-  const prevExpensesTotal = prevExpenses.reduce((s, e) => s + e.amountPaise, 0);
-
-  const liquidCash = store.cashAccounts
-    .filter((a) => a.isLiquid)
-    .reduce((s, a) => s + a.balancePaise, 0);
-
-  const investmentValue = store.investments.reduce((s, i) => s + i.currentValuePaise, 0);
-  const investmentInvested = store.investments.reduce((s, i) => s + i.investedPaise, 0);
-  const loansOutstanding = store.loans
-    .filter((l) => l.status === "active")
-    .reduce((s, l) => s + l.outstandingPaise, 0);
-  const totalEmi = store.loans
-    .filter((l) => l.status === "active")
-    .reduce((s, l) => s + l.emiPaise, 0);
-
-  const assets = liquidCash + investmentValue + store.emergencyFund.currentPaise;
+  const liquidCash = accounts.filter((a) => a.isLiquid).reduce((s, a) => s + a.balancePaise, 0);
+  const investmentValue = investmentRows.reduce((s, i) => s + i.currentValuePaise, 0);
+  const investmentInvested = investmentRows.reduce((s, i) => s + i.investedPaise, 0);
+  const activeLoans = loanRows.filter((l) => l.status === "active");
+  const loansOutstanding = activeLoans.reduce((s, l) => s + l.outstandingPaise, 0);
+  const totalEmi = activeLoans.reduce((s, l) => s + l.emiPaise, 0);
+  const ef = efRows[0] || emptyEmergency(userId);
+  const assets = liquidCash + investmentValue + ef.currentPaise;
   const netWorth = assets - loansOutstanding;
 
-  const trailing = [0, 1, 2].map((i) => {
-    const m = monthKey(subMonths(new Date(month), i));
-    const p = m.slice(0, 7);
-    return store.expenses
-      .filter((e) => e.date.startsWith(p))
-      .reduce((s, e) => s + e.amountPaise, 0);
-  });
-  const burnRate = Math.round(trailing.reduce((a, b) => a + b, 0) / 3);
+  const trailingTotals = await Promise.all(
+    [0, 1, 2].map(async (i) => {
+      const m = monthKey(subMonths(new Date(month), i));
+      const { start, end } = monthBounds(m);
+      const rows = await db
+        .select()
+        .from(expenses)
+        .where(
+          and(
+            eq(expenses.userId, userId),
+            gte(expenses.date, start),
+            lte(expenses.date, end)
+          )
+        );
+      return rows.reduce((s, e) => s + e.amountPaise, 0);
+    })
+  );
+  const burnRate = Math.round(trailingTotals.reduce((a, b) => a + b, 0) / 3);
 
-  const sipPaise = store.investments.reduce((s, i) => s + (i.sipAmountPaise || 0), 0);
-  const homeRule = store.recurringRules.find((r) => r.label === "Home Contribution");
+  const sipPaise = investmentRows.reduce((s, i) => s + (i.sipAmountPaise || 0), 0);
+  const homeRule = recurring.find((r) => r.label === "Home Contribution");
   const homePaise = homeRule?.amountPaise || 0;
-
   const savings = income - expensesTotal;
   const sr = savingsRateBps(income, expensesTotal);
   const prevSr = savingsRateBps(prevIncome, prevExpensesTotal);
-
-  const ef = store.emergencyFund;
   const efProgress = ef.targetPaise > 0 ? ef.currentPaise / ef.targetPaise : 0;
 
-  const goalsOnTrack = store.goals.filter((g) => {
-    if (g.status !== "active") return false;
+  const activeGoals = goalRows.filter((g) => g.status === "active");
+  const goalsOnTrack = activeGoals.filter((g) => {
+    if (g.targetPaise <= 0) return false;
     return g.currentPaise / g.targetPaise >= 0.1 || g.type === "emergency_fund";
   }).length;
-  const activeGoals = store.goals.filter((g) => g.status === "active").length;
 
-  const healthScore = calculateHealthScore({
-    emergencyProgress: efProgress,
-    savingsRate: income > 0 ? savings / income : 0,
-    debtToIncome: income > 0 ? (totalEmi + homePaise) / income : 0,
-    investmentRate: income > 0 ? sipPaise / income : 0,
-    expenseRatio: income > 0 ? expensesTotal / income : 0,
-    goalsOnTrackRatio: activeGoals > 0 ? goalsOnTrack / activeGoals : 0,
-  });
+  const hasAnyData =
+    income > 0 ||
+    expensesTotal > 0 ||
+    liquidCash > 0 ||
+    investmentValue > 0 ||
+    loansOutstanding > 0 ||
+    ef.currentPaise > 0;
 
-  const categoryBreakdown = store.categories
+  const healthScore = hasAnyData
+    ? calculateHealthScore({
+        emergencyProgress: efProgress,
+        savingsRate: income > 0 ? savings / income : 0,
+        debtToIncome: income > 0 ? (totalEmi + homePaise) / income : 0,
+        investmentRate: income > 0 ? sipPaise / income : 0,
+        expenseRatio: income > 0 ? expensesTotal / income : 0,
+        goalsOnTrackRatio: activeGoals.length > 0 ? goalsOnTrack / activeGoals.length : 0,
+      })
+    : 0;
+
+  const categoryBreakdown = categoryRows
     .map((c) => ({
       name: c.name,
-      value: monthExpenses
+      value: monthExpenseRows
         .filter((e) => e.categoryId === c.id)
         .reduce((s, e) => s + e.amountPaise, 0),
     }))
@@ -105,25 +194,26 @@ export function getDashboardSummary(month = monthKey()) {
   const incomeGrowth =
     prevIncome > 0 ? ((income - prevIncome) / prevIncome) * 100 : null;
 
-  const edu = store.loans.find((l) => l.name === "Education Loan");
+  const edu = activeLoans.find((l) => l.name.toLowerCase().includes("education"));
 
-  const insights = generateInsights({
-    thisMonthExpenses: expensesTotal,
-    lastMonthExpenses: prevExpensesTotal,
-    savingsRateBps: sr,
-    lastSavingsRateBps: prevSr,
-    emergencyCurrent: ef.currentPaise,
-    emergencyTarget: ef.targetPaise,
-    emergencyMonthly: ef.monthlyContributionPaise || 0,
-    educationOutstanding: edu?.outstandingPaise || 0,
-    educationRateBps: edu?.annualRateBps || 0,
-    educationEmi: edu?.emiPaise || 0,
-    investmentInvested,
-    investmentCurrent: investmentValue,
-  });
+  const insights = hasAnyData
+    ? generateInsights({
+        thisMonthExpenses: expensesTotal,
+        lastMonthExpenses: prevExpensesTotal,
+        savingsRateBps: sr,
+        lastSavingsRateBps: prevSr,
+        emergencyCurrent: ef.currentPaise,
+        emergencyTarget: ef.targetPaise,
+        emergencyMonthly: ef.monthlyContributionPaise || 0,
+        educationOutstanding: edu?.outstandingPaise || 0,
+        educationRateBps: edu?.annualRateBps || 0,
+        educationEmi: edu?.emiPaise || 0,
+        investmentInvested,
+        investmentCurrent: investmentValue,
+      })
+    : [];
 
-  const goalsPreview = store.goals
-    .filter((g) => g.status === "active")
+  const goalsPreview = activeGoals
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .slice(0, 4)
     .map((g) => ({
@@ -155,52 +245,80 @@ export function getDashboardSummary(month = monthKey()) {
     homePaise,
     assets,
     liabilities: loansOutstanding,
+    isEmpty: !hasAnyData,
   };
 }
 
-export function getSalaryEntries() {
-  return [...getStore().salaryEntries].sort((a, b) => b.month.localeCompare(a.month));
+export async function getSalaryEntries() {
+  const db = requireDb();
+  const userId = await requireUserId();
+  return db
+    .select()
+    .from(salaryEntries)
+    .where(eq(salaryEntries.userId, userId))
+    .orderBy(desc(salaryEntries.month));
 }
 
-export function getExpenses(filters?: {
+export async function getExpenses(filters?: {
   search?: string;
   categoryId?: string;
   from?: string;
   to?: string;
 }) {
-  const store = getStore();
-  let list = [...store.expenses];
-  if (filters?.categoryId) list = list.filter((e) => e.categoryId === filters.categoryId);
-  if (filters?.from) list = list.filter((e) => e.date >= filters.from!);
-  if (filters?.to) list = list.filter((e) => e.date <= filters.to!);
+  const db = requireDb();
+  const userId = await requireUserId();
+  const cats = await db.select().from(expenseCategories);
+  const catMap = new Map(cats.map((c) => [c.id, c.name]));
+
+  const conditions = [eq(expenses.userId, userId)];
+  if (filters?.categoryId) conditions.push(eq(expenses.categoryId, filters.categoryId));
+  if (filters?.from) conditions.push(gte(expenses.date, filters.from));
+  if (filters?.to) conditions.push(lte(expenses.date, filters.to));
+
+  let list = await db
+    .select()
+    .from(expenses)
+    .where(and(...conditions))
+    .orderBy(desc(expenses.date));
+
   if (filters?.search) {
     const q = filters.search.toLowerCase();
     list = list.filter(
       (e) =>
         e.merchant?.toLowerCase().includes(q) ||
         e.notes?.toLowerCase().includes(q) ||
-        store.categories.find((c) => c.id === e.categoryId)?.name.toLowerCase().includes(q)
+        catMap.get(e.categoryId)?.toLowerCase().includes(q)
     );
   }
-  return list
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .map((e) => ({
-      ...e,
-      categoryName: store.categories.find((c) => c.id === e.categoryId)?.name || "—",
-    }));
+
+  return list.map((e) => ({
+    ...e,
+    categoryName: catMap.get(e.categoryId) || "—",
+  }));
 }
 
-export function getCategories() {
-  return getStore().categories;
+export async function getCategories() {
+  const db = requireDb();
+  return db.select().from(expenseCategories).orderBy(expenseCategories.sortOrder);
 }
 
-export function getLoans() {
-  return [...getStore().loans].sort((a, b) => a.priority - b.priority);
+export async function getLoans() {
+  const db = requireDb();
+  const userId = await requireUserId();
+  const rows = await db.select().from(loans).where(eq(loans.userId, userId));
+  return rows.sort((a, b) => a.priority - b.priority);
 }
 
-export function getLoanDetail(id: string) {
-  const loan = getStore().loans.find((l) => l.id === id);
+export async function getLoanDetail(id: string) {
+  const db = requireDb();
+  const userId = await requireUserId();
+  const [loan] = await db
+    .select()
+    .from(loans)
+    .where(and(eq(loans.id, id), eq(loans.userId, userId)))
+    .limit(1);
   if (!loan) return null;
+
   const remaining = remainingTenureMonths({
     outstandingPaise: loan.outstandingPaise,
     annualRateBps: loan.annualRateBps,
@@ -211,14 +329,21 @@ export function getLoanDetail(id: string) {
     outstandingPaise: loan.outstandingPaise,
     annualRateBps: loan.annualRateBps,
     emiPaise: loan.emiPaise,
-    extraPaymentPaise: loan.extraPaymentPaise || 20000_00,
+    extraPaymentPaise: loan.extraPaymentPaise || 2000000,
   });
-  const payments = getStore().loanPayments.filter((p) => p.loanId === id);
+  const payments = await db
+    .select()
+    .from(loanPayments)
+    .where(eq(loanPayments.loanId, id))
+    .orderBy(desc(loanPayments.paidOn));
+
   return { loan, remaining, saved, payments };
 }
 
-export function getInvestments() {
-  const list = getStore().investments;
+export async function getInvestments() {
+  const db = requireDb();
+  const userId = await requireUserId();
+  const list = await db.select().from(investments).where(eq(investments.userId, userId));
   const totalInvested = list.reduce((s, i) => s + i.investedPaise, 0);
   const totalCurrent = list.reduce((s, i) => s + i.currentValuePaise, 0);
   const allocation = list.map((i) => ({
@@ -240,11 +365,19 @@ export function getInvestments() {
     allocation,
     monthlySip,
     expectedFV,
+    isEmpty: list.length === 0,
   };
 }
 
-export function getEmergencyFundView() {
-  const ef = getStore().emergencyFund;
+export async function getEmergencyFundView() {
+  const db = requireDb();
+  const userId = await requireUserId();
+  const [row] = await db
+    .select()
+    .from(emergencyFund)
+    .where(eq(emergencyFund.userId, userId))
+    .limit(1);
+  const ef = row || emptyEmergency(userId);
   const remaining = Math.max(0, ef.targetPaise - ef.currentPaise);
   const monthly = ef.monthlyContributionPaise || 0;
   const months = estimateCompletionMonths(remaining, monthly);
@@ -253,63 +386,84 @@ export function getEmergencyFundView() {
   return { ef, remaining, months, progress, phase2Remaining };
 }
 
-export function getGoalsView() {
-  const store = getStore();
-  const summary = getDashboardSummary();
-  return store.goals
+export async function getGoalsView() {
+  const db = requireDb();
+  const userId = await requireUserId();
+  const summary = await getDashboardSummary();
+  const [ef] = await db
+    .select()
+    .from(emergencyFund)
+    .where(eq(emergencyFund.userId, userId))
+    .limit(1);
+  const investmentRows = await db
+    .select()
+    .from(investments)
+    .where(eq(investments.userId, userId));
+  const loanRows = await db.select().from(loans).where(eq(loans.userId, userId));
+  const goalRows = await db.select().from(goals).where(eq(goals.userId, userId));
+
+  return goalRows
     .filter((g) => g.status === "active")
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((g) => {
       let current = g.currentPaise;
-      if (g.type === "emergency_fund") current = store.emergencyFund.currentPaise;
+      if (g.type === "emergency_fund") current = ef?.currentPaise || 0;
       if (g.type === "net_worth") current = summary.netWorth;
       if (g.type === "investment") {
-        current = store.investments.reduce((s, i) => s + i.currentValuePaise, 0);
+        current = investmentRows.reduce((s, i) => s + i.currentValuePaise, 0);
       }
       if (g.type === "debt_payoff") {
         const loanId = (g.linkedEntity as { loanId?: string })?.loanId;
-        const loan = store.loans.find((l) => l.id === loanId);
-        current = loan ? loan.principalPaise - loan.outstandingPaise : 0;
-        // For payoff goal, target is outstanding at goal creation — progress = paid toward closure
-        // Better: progress = 1 - outstanding/original target
-        if (loan) {
+        const loan = loanRows.find((l) => l.id === loanId);
+        if (loan && g.targetPaise > 0) {
           current = Math.max(0, g.targetPaise - loan.outstandingPaise);
+        } else if (loan) {
+          current = Math.max(0, loan.principalPaise - loan.outstandingPaise);
+        } else {
+          current = 0;
         }
       }
-      const progress = g.targetPaise > 0 ? Math.min(100, (current / g.targetPaise) * 100) : 0;
-      const remaining = Math.max(0, g.targetPaise - current);
-      const contribution = Math.max(1000_00, Math.round(remaining / 24));
+      const target = g.targetPaise > 0 ? g.targetPaise : 1;
+      const progress = Math.min(100, (current / target) * 100);
+      const remaining = Math.max(0, (g.targetPaise || 0) - current);
+      const contribution = Math.max(100000, Math.round(remaining / 24));
       const etaMonths = estimateCompletionMonths(remaining, contribution);
       return { ...g, currentPaise: current, progress, remaining, contribution, etaMonths };
     });
 }
 
-export function getNetWorthSeries() {
-  const summary = getDashboardSummary();
-  const store = getStore();
-  // Generate synthetic historical points if no snapshots
-  if (store.netWorthSnapshots.length === 0) {
-    const points = [];
-    for (let i = 11; i >= 0; i--) {
-      const d = subMonths(new Date(), i);
-      const drift = (11 - i) * 15000_00;
-      points.push({
-        label: format(d, "MMM yy"),
-        value: summary.netWorth - drift + Math.round(Math.random() * 5000_00),
-      });
-    }
-    // Fix last point to actual
-    points[points.length - 1].value = summary.netWorth;
-    return { current: summary, series: points, monthlyChange: 15000_00 };
+export async function getNetWorthSeries() {
+  const summary = await getDashboardSummary();
+  const db = requireDb();
+  const userId = await requireUserId();
+  const snaps = await db
+    .select()
+    .from(netWorthSnapshots)
+    .where(eq(netWorthSnapshots.userId, userId))
+    .orderBy(netWorthSnapshots.asOf);
+
+  if (snaps.length === 0) {
+    return {
+      current: summary,
+      series: [{ label: format(new Date(), "MMM yy"), value: summary.netWorth }],
+      monthlyChange: 0,
+    };
   }
-  const series = store.netWorthSnapshots
-    .sort((a, b) => a.asOf.localeCompare(b.asOf))
-    .map((s) => ({ label: s.asOf.slice(0, 7), value: s.netPaise }));
-  return { current: summary, series, monthlyChange: 0 };
+
+  const series = snaps.map((s) => ({
+    label: s.asOf.slice(0, 7),
+    value: s.netPaise,
+  }));
+  const monthlyChange =
+    snaps.length >= 2
+      ? snaps[snaps.length - 1].netPaise - snaps[snaps.length - 2].netPaise
+      : 0;
+
+  return { current: summary, series, monthlyChange };
 }
 
-export function getReports() {
-  const summary = getDashboardSummary();
+export async function getReports() {
+  const summary = await getDashboardSummary();
   const income = summary.income;
   return {
     month: summary.month,
@@ -324,25 +478,93 @@ export function getReports() {
     healthScore: summary.healthScore,
     cashFlow: summary.cashFlowPaise,
     insights: summary.insights,
+    isEmpty: summary.isEmpty,
   };
 }
 
-export function getReminders() {
-  return getStore().notifications.filter((n) => !n.completedAt);
+export async function getReminders() {
+  const db = requireDb();
+  const userId = await requireUserId();
+  return db
+    .select()
+    .from(notifications)
+    .where(and(eq(notifications.userId, userId), sql`${notifications.completedAt} IS NULL`));
 }
 
-export function getSettings() {
-  return getStore().settings;
+export async function getSettings() {
+  const db = requireDb();
+  const userId = await requireUserId();
+  const [row] = await db.select().from(settings).where(eq(settings.userId, userId)).limit(1);
+  return (
+    row || {
+      userId,
+      currency: "INR",
+      theme: "dark" as const,
+      locale: "en-IN",
+      notificationsEnabled: true,
+      monthStartDay: 1,
+      exportPrefs: {},
+    }
+  );
 }
 
-export function getCashAccounts() {
-  return getStore().cashAccounts;
+export async function getCashAccounts() {
+  const db = requireDb();
+  const userId = await requireUserId();
+  return db.select().from(cashAccounts).where(eq(cashAccounts.userId, userId));
 }
 
-export function getRecurringRules() {
-  const store = getStore();
-  return store.recurringRules.map((r) => ({
+export async function getRecurringRules() {
+  const db = requireDb();
+  const userId = await requireUserId();
+  const rules = await db.select().from(recurringRules).where(eq(recurringRules.userId, userId));
+  const cats = await db.select().from(expenseCategories);
+  const catMap = new Map(cats.map((c) => [c.id, c.name]));
+  return rules.map((r) => ({
     ...r,
-    categoryName: store.categories.find((c) => c.id === r.categoryId)?.name || "—",
+    categoryName: catMap.get(r.categoryId) || "—",
   }));
+}
+
+export async function getUserExportPayload() {
+  const db = requireDb();
+  const userId = await requireUserId();
+  const [
+    accounts,
+    salaries,
+    expenseRows,
+    loanRows,
+    investmentRows,
+    goalRows,
+    ef,
+    notifs,
+    userSettings,
+    recurring,
+  ] = await Promise.all([
+    db.select().from(cashAccounts).where(eq(cashAccounts.userId, userId)),
+    db.select().from(salaryEntries).where(eq(salaryEntries.userId, userId)),
+    db.select().from(expenses).where(eq(expenses.userId, userId)),
+    db.select().from(loans).where(eq(loans.userId, userId)),
+    db.select().from(investments).where(eq(investments.userId, userId)),
+    db.select().from(goals).where(eq(goals.userId, userId)),
+    db.select().from(emergencyFund).where(eq(emergencyFund.userId, userId)),
+    db.select().from(notifications).where(eq(notifications.userId, userId)),
+    db.select().from(settings).where(eq(settings.userId, userId)),
+    db.select().from(recurringRules).where(eq(recurringRules.userId, userId)),
+  ]);
+
+  return {
+    exportedAt: new Date().toISOString(),
+    userId,
+    cashAccounts: accounts,
+    salaryEntries: salaries,
+    expenses: expenseRows,
+    loans: loanRows,
+    investments: investmentRows,
+    goals: goalRows,
+    emergencyFund: ef[0] || null,
+    notifications: notifs,
+    settings: userSettings[0] || null,
+    recurringRules: recurring,
+  };
 }

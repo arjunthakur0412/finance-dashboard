@@ -1,14 +1,18 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MetricCard } from "@/components/feedback/metric-card";
 import { MoneyAreaChart } from "@/components/charts";
+import { Button } from "@/components/ui/button";
 import { getLoanDetail } from "@/features/dashboard/queries";
 import { buildAmortizationSchedule } from "@/lib/finance";
 import { formatINR } from "@/lib/money";
-import { isDemoMode } from "@/lib/demo-flag";
 import { LoanPaymentForm } from "@/features/loans/loan-payment-form";
 import { ExtraPaymentForm } from "@/features/loans/extra-payment-form";
+import { LoanEditButton } from "@/features/loans/loan-edit-form";
+import { LoanDeleteButton } from "@/features/loans/loan-delete-button";
+import { ArrowLeft } from "lucide-react";
 
 export const metadata = { title: "Loan detail" };
 
@@ -18,7 +22,7 @@ export default async function LoanDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const detail = getLoanDetail(id);
+  const detail = await getLoanDetail(id);
   if (!detail) notFound();
   const { loan, remaining, saved } = detail;
 
@@ -30,24 +34,41 @@ export default async function LoanDetailPage({
   });
 
   const projection = schedule
-    .filter((_, i) => i % Math.max(1, Math.floor(schedule.length / 12)) === 0 || i === schedule.length - 1)
+    .filter(
+      (_, i) =>
+        i % Math.max(1, Math.floor(schedule.length / 12)) === 0 ||
+        i === schedule.length - 1
+    )
     .map((r) => ({ label: `M${r.month}`, value: r.balance }));
 
-  const interestPaid = Math.max(0, loan.principalPaise - loan.outstandingPaise === 0
-    ? 0
-    : Math.round((loan.principalPaise - loan.outstandingPaise) * (loan.annualRateBps / 10000) * 0.5));
-  // Approximate principal paid
   const principalPaid = Math.max(0, loan.principalPaise - loan.outstandingPaise);
+  const interestPaid = Math.round(principalPaid * (loan.annualRateBps / 10000) * 0.5);
 
   return (
     <>
-      <Topbar title={loan.name} demo={isDemoMode()} />
+      <Topbar title={loan.name} />
       <div className="space-y-6 p-4 md:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+            <Link href="/loans">
+              <ArrowLeft className="h-3.5 w-3.5" />
+              All loans
+            </Link>
+          </Button>
+          <div className="flex items-center gap-2">
+            <LoanEditButton loan={loan} />
+            <LoanDeleteButton loanId={loan.id} loanName={loan.name} />
+          </div>
+        </div>
+
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard title="Outstanding" valuePaise={loan.outstandingPaise} formatCompact />
           <MetricCard title="Principal paid" valuePaise={principalPaid} formatCompact />
           <MetricCard title="EMI" valuePaise={loan.emiPaise} />
-          <MetricCard title="Interest saved (w/ ₹20k extra)" valuePaise={saved.saved} formatCompact
+          <MetricCard
+            title="Interest saved (w/ ₹20k extra)"
+            valuePaise={saved.saved}
+            formatCompact
             subtitle={`${saved.monthsSaved} months faster`}
           />
         </div>

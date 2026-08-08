@@ -6,14 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { getEmergencyFundView, getDashboardSummary } from "@/features/dashboard/queries";
 import { suggestedEmergencyContribution } from "@/lib/finance";
 import { formatINR } from "@/lib/money";
-import { isDemoMode } from "@/lib/demo-flag";
 import { EmergencyFundForm } from "@/features/emergency-fund/ef-form";
 
 export const metadata = { title: "Emergency Fund" };
 
-export default function EmergencyFundPage() {
-  const view = getEmergencyFundView();
-  const dash = getDashboardSummary();
+export default async function EmergencyFundPage() {
+  const view = await getEmergencyFundView();
+  const dash = await getDashboardSummary();
   const suggested = suggestedEmergencyContribution({
     incomePaise: dash.income,
     expensesPaise: dash.expensesTotal,
@@ -29,7 +28,7 @@ export default function EmergencyFundPage() {
 
   return (
     <>
-      <Topbar title="Emergency Fund" demo={isDemoMode()} />
+      <Topbar title="Emergency Fund" />
       <div className="space-y-6 p-4 md:p-6">
         <Card className="border-primary/30 bg-primary/5">
           <CardHeader>

@@ -4,16 +4,15 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { getGoalsView } from "@/features/dashboard/queries";
 import { formatINR } from "@/lib/money";
-import { isDemoMode } from "@/lib/demo-flag";
 
 export const metadata = { title: "Goals" };
 
-export default function GoalsPage() {
-  const goals = getGoalsView();
+export default async function GoalsPage() {
+  const goals = await getGoalsView();
 
   return (
     <>
-      <Topbar title="Goals" demo={isDemoMode()} />
+      <Topbar title="Goals" />
       <div className="grid gap-4 p-4 md:grid-cols-2 md:p-6">
         {goals.map((g) => (
           <Card key={g.id}>

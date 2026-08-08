@@ -2,24 +2,23 @@ import { Topbar } from "@/components/layout/topbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getSalaryEntries } from "@/features/dashboard/queries";
 import { formatINR } from "@/lib/money";
-import { isDemoMode } from "@/lib/demo-flag";
 import { SalaryForm } from "@/features/salary/salary-form";
 import { MoneyAreaChart } from "@/components/charts";
+import { EmptyState } from "@/components/feedback/empty-state";
+import { Wallet } from "lucide-react";
 
 export const metadata = { title: "Salary" };
 
-export default function SalaryPage() {
-  const entries = getSalaryEntries();
-  const chart = [...entries]
-    .reverse()
-    .map((e) => ({
-      label: e.month.slice(0, 7),
-      value: e.basePaise + e.bonusPaise + e.otherPaise,
-    }));
+export default async function SalaryPage() {
+  const entries = await getSalaryEntries();
+  const chart = [...entries].reverse().map((e) => ({
+    label: e.month.slice(0, 7),
+    value: e.basePaise + e.bonusPaise + e.otherPaise,
+  }));
 
   return (
     <>
-      <Topbar title="Salary" demo={isDemoMode()} />
+      <Topbar title="Salary" />
       <div className="space-y-6 p-4 md:p-6">
         <div className="grid gap-4 lg:grid-cols-2">
           <SalaryForm />
@@ -28,7 +27,13 @@ export default function SalaryPage() {
               <CardTitle className="text-sm">Income trend</CardTitle>
             </CardHeader>
             <CardContent>
-              <MoneyAreaChart data={chart} color="#34d399" />
+              {chart.length ? (
+                <MoneyAreaChart data={chart} color="#34d399" />
+              ) : (
+                <p className="py-16 text-center text-sm text-muted-foreground">
+                  Log your first salary to see the trend.
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -37,40 +42,49 @@ export default function SalaryPage() {
             <CardTitle className="text-sm">Entries</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {entries.map((e, i) => {
-              const total = e.basePaise + e.bonusPaise + e.otherPaise;
-              const prev = entries[i + 1];
-              const prevTotal = prev
-                ? prev.basePaise + prev.bonusPaise + prev.otherPaise
-                : null;
-              const growth =
-                prevTotal && prevTotal > 0
-                  ? ((total - prevTotal) / prevTotal) * 100
+            {entries.length === 0 ? (
+              <EmptyState
+                icon={Wallet}
+                title="No salary entries"
+                description="Add this month's salary, bonus, and other income to unlock cash-flow insights."
+                className="border-0 py-10"
+              />
+            ) : (
+              entries.map((e, i) => {
+                const total = e.basePaise + e.bonusPaise + e.otherPaise;
+                const prev = entries[i + 1];
+                const prevTotal = prev
+                  ? prev.basePaise + prev.bonusPaise + prev.otherPaise
                   : null;
-              return (
-                <div
-                  key={e.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/50 px-4 py-3"
-                >
-                  <div>
-                    <p className="font-medium">{e.month.slice(0, 7)}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Base {formatINR(e.basePaise)} · Bonus {formatINR(e.bonusPaise)} · Other{" "}
-                      {formatINR(e.otherPaise)}
-                    </p>
+                const growth =
+                  prevTotal && prevTotal > 0
+                    ? ((total - prevTotal) / prevTotal) * 100
+                    : null;
+                return (
+                  <div
+                    key={e.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/50 px-4 py-3"
+                  >
+                    <div>
+                      <p className="font-medium">{e.month.slice(0, 7)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Base {formatINR(e.basePaise)} · Bonus {formatINR(e.bonusPaise)} · Other{" "}
+                        {formatINR(e.otherPaise)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold">{formatINR(total)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Yearly ~{formatINR(total * 12, { compact: true })}
+                        {growth != null
+                          ? ` · ${growth >= 0 ? "+" : ""}${growth.toFixed(1)}% MoM`
+                          : ""}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-semibold">{formatINR(total)}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Yearly ~{formatINR(total * 12, { compact: true })}
-                      {growth != null
-                        ? ` · ${growth >= 0 ? "+" : ""}${growth.toFixed(1)}% MoM`
-                        : ""}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </CardContent>
         </Card>
       </div>

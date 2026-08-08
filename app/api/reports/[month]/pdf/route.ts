@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ month: string }> }
 ) {
   const { month } = await params;
-  const r = getReports();
+  const r = await getReports();
 
   // Lightweight printable HTML PDF alternative — works without heavy PDF deps failing
   const html = `<!DOCTYPE html>

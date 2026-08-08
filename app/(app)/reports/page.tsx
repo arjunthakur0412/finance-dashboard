@@ -4,13 +4,12 @@ import { Button } from "@/components/ui/button";
 import { ScoreCard } from "@/components/feedback/metric-card";
 import { getReports } from "@/features/dashboard/queries";
 import { formatINR, formatPercent } from "@/lib/money";
-import { isDemoMode } from "@/lib/demo-flag";
 import Link from "next/link";
 
 export const metadata = { title: "Reports" };
 
-export default function ReportsPage() {
-  const r = getReports();
+export default async function ReportsPage() {
+  const r = await getReports();
 
   const rows = [
     { label: "Income", value: formatINR(r.income) },
@@ -25,7 +24,7 @@ export default function ReportsPage() {
 
   return (
     <>
-      <Topbar title="Reports" demo={isDemoMode()} />
+      <Topbar title="Reports" />
       <div className="space-y-6 p-4 md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">

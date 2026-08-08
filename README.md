@@ -2,54 +2,55 @@
 
 Personal finance operating system — salary, expenses, loans, investments, emergency fund, goals, net worth, reports, and insights.
 
-## Quick start (demo mode)
+Multi-user ready: each allowlisted Google account gets a **private empty workspace** on first login.
+
+## Quick start
 
 ```bash
 npm install
+cp .env.example .env.local
+# Fill DATABASE_URL, AUTH_*, ALLOWED_EMAILS
+npm run db:push
+npm run db:seed
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Demo mode uses in-memory seeded data.
+Open [http://localhost:3000](http://localhost:3000) and sign in with Google.
 
-## Production (Neon + Google)
+## Multi-user allowlist
 
-1. Copy `.env.example` → `.env.local`
-2. Set `DATABASE_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `ALLOWED_EMAIL`
-3. Set `DEMO_MODE=false`
-4. `npm run db:push` then `npm run db:seed`
-5. `npm run dev`
+```env
+ALLOWED_EMAILS=you@gmail.com,friend1@gmail.com,friend2@gmail.com
+DEMO_MODE=false
+```
+
+Only emails in this list can sign in. Each user starts with zero balances and fills their own data.
+
+## Production (Vercel + Neon + Google)
+
+1. Set env vars on Vercel (`DATABASE_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_*`, `ALLOWED_EMAILS`, `AUTH_URL`, `NEXT_PUBLIC_APP_URL`)
+2. Add Google redirect URI: `https://your-app.vercel.app/api/auth/callback/google`
+3. Run `npm run db:push` and `npm run db:seed` against Neon
+4. Deploy
 
 ## Scripts
 
-| Script            | Purpose                     |
-| ----------------- | --------------------------- |
-| `npm run dev`     | Dev server                  |
-| `npm run build`   | Production build            |
-| `npm test`        | Finance engine unit tests   |
+| Script | Purpose |
+|--------|---------|
+| `npm run dev` | Dev server |
+| `npm run build` | Production build |
+| `npm test` | Finance engine unit tests |
 | `npm run db:push` | Push Drizzle schema to Neon |
-| `npm run db:seed` | Seed expense categories     |
+| `npm run db:seed` | Seed shared expense categories |
 
 ## Stack
 
-Next.js 15 · React 19 · Tailwind · shadcn-style UI · Drizzle · Neon · Auth.js · Recharts · Zustand · TanStack Table · Framer Motion · Zod
+Next.js 15 · React 19 · Tailwind · Drizzle · Neon · Auth.js · Recharts · Zustand · TanStack Table · Framer Motion · Zod
 
 ## Future scope
 
-- Bank / UPI account sync (Open Banking / aggregator APIs)
-- Live mutual fund NAV and crypto price updates
-- Broker / demat portfolio import (Zerodha, Groww, etc.)
-- Multi-currency support with FX conversion
-- Shared household / family access (multi-user)
-- Push and email reminders (EMI, SIP, salary day)
-- Tax helpers (80C, capital gains summaries)
-- WhatsApp or Telegram notification bots
-- Recurring expense auto-generation from rules
-- Debt payoff strategies (avalanche vs snowball simulator)
-- Scenario planning (“what if I invest ₹X more?”)
-- Receipt OCR / photo expense capture
-- Native iOS / Android wrappers beyond PWA
-- Offline write queue with sync when back online
-- Automated monthly report emails + richer PDF layouts
-- Budget caps per category with overspend alerts
-
-Thanks for visiting this repo
+- Bank / UPI sync via Account Aggregator
+- Live mutual fund NAV and crypto prices
+- Push / email reminders
+- Debt payoff simulators
+- Offline write queue

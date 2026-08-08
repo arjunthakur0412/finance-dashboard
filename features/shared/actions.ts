@@ -1,10 +1,25 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getStore, newId } from "@/lib/db/memory";
+import { requireDb } from "@/lib/db";
+import { requireUserId } from "@/lib/session";
 import { monthlyRateFromBps } from "@/lib/finance";
 import { moneyRupeesSchema, optionalMoneyRupeesSchema } from "@/lib/validations/common";
+import {
+  cashAccounts,
+  emergencyFund,
+  expenses,
+  goals,
+  investments,
+  loanPayments,
+  loans,
+  notifications,
+  salaryEntries,
+  settings,
+} from "@/lib/db/schema";
+import { getUserExportPayload } from "@/features/dashboard/queries";
 
 function revalidateAll() {
   revalidatePath("/", "layout");
@@ -26,23 +41,33 @@ export async function upsertSalary(formData: FormData) {
     notes: formData.get("notes") || undefined,
   });
   const month = `${parsed.month}-01`;
-  const store = getStore();
-  const existing = store.salaryEntries.find((s) => s.month === month);
+  const db = requireDb();
+  const userId = await requireUserId();
+
+  const [existing] = await db
+    .select()
+    .from(salaryEntries)
+    .where(and(eq(salaryEntries.userId, userId), eq(salaryEntries.month, month)))
+    .limit(1);
+
   if (existing) {
-    existing.basePaise = parsed.base;
-    existing.bonusPaise = parsed.bonus;
-    existing.otherPaise = parsed.other;
-    existing.notes = parsed.notes || null;
+    await db
+      .update(salaryEntries)
+      .set({
+        basePaise: parsed.base,
+        bonusPaise: parsed.bonus,
+        otherPaise: parsed.other,
+        notes: parsed.notes || null,
+      })
+      .where(eq(salaryEntries.id, existing.id));
   } else {
-    store.salaryEntries.push({
-      id: newId("sal"),
-      userId: store.user.id,
+    await db.insert(salaryEntries).values({
+      userId,
       month,
       basePaise: parsed.base,
       bonusPaise: parsed.bonus,
       otherPaise: parsed.other,
       notes: parsed.notes || null,
-      createdAt: new Date(),
     });
   }
   revalidateAll();
@@ -51,7 +76,7 @@ export async function upsertSalary(formData: FormData) {
 
 export async function createExpense(formData: FormData) {
   const schema = z.object({
-    categoryId: z.string().min(1),
+    categoryId: z.string().uuid(),
     amount: moneyRupeesSchema,
     date: z.string().min(1),
     merchant: z.string().optional(),
@@ -64,55 +89,208 @@ export async function createExpense(formData: FormData) {
     merchant: formData.get("merchant") || undefined,
     notes: formData.get("notes") || undefined,
   });
-  const store = getStore();
-  store.expenses.unshift({
-    id: newId("exp"),
-    userId: store.user.id,
+  const db = requireDb();
+  const userId = await requireUserId();
+
+  const [account] = await db
+    .select()
+    .from(cashAccounts)
+    .where(and(eq(cashAccounts.userId, userId), eq(cashAccounts.isLiquid, true)))
+    .limit(1);
+
+  await db.insert(expenses).values({
+    userId,
     categoryId: parsed.categoryId,
     amountPaise: parsed.amount,
     date: parsed.date,
     merchant: parsed.merchant || null,
     notes: parsed.notes || null,
-    accountId: store.cashAccounts[0]?.id || null,
-    recurringRuleId: null,
-    createdAt: new Date(),
+    accountId: account?.id || null,
   });
-  // Deduct from primary liquid account
-  const acc = store.cashAccounts.find((a) => a.isLiquid);
-  if (acc) acc.balancePaise = Math.max(0, acc.balancePaise - parsed.amount);
+
+  if (account) {
+    await db
+      .update(cashAccounts)
+      .set({
+        balancePaise: Math.max(0, account.balancePaise - parsed.amount),
+        updatedAt: new Date(),
+      })
+      .where(eq(cashAccounts.id, account.id));
+  }
+
   revalidateAll();
   return { ok: true };
 }
 
 export async function deleteExpense(id: string) {
-  const store = getStore();
-  const idx = store.expenses.findIndex((e) => e.id === id);
-  if (idx >= 0) store.expenses.splice(idx, 1);
+  const db = requireDb();
+  const userId = await requireUserId();
+  await db
+    .delete(expenses)
+    .where(and(eq(expenses.id, id), eq(expenses.userId, userId)));
   revalidateAll();
   return { ok: true };
 }
 
 export async function updateCashAccount(formData: FormData) {
   const schema = z.object({
-    id: z.string(),
+    id: z.string().uuid(),
     balance: moneyRupeesSchema,
   });
   const parsed = schema.parse({
     id: formData.get("id"),
     balance: formData.get("balance"),
   });
-  const acc = getStore().cashAccounts.find((a) => a.id === parsed.id);
-  if (acc) {
-    acc.balancePaise = parsed.balance;
-    acc.updatedAt = new Date();
-  }
+  const db = requireDb();
+  const userId = await requireUserId();
+  await db
+    .update(cashAccounts)
+    .set({ balancePaise: parsed.balance, updatedAt: new Date() })
+    .where(and(eq(cashAccounts.id, parsed.id), eq(cashAccounts.userId, userId)));
+  revalidateAll();
+  return { ok: true };
+}
+
+export async function createCashAccount(formData: FormData) {
+  const schema = z.object({
+    name: z.string().min(1),
+    type: z.enum(["bank", "cash", "wallet"]),
+    balance: moneyRupeesSchema,
+  });
+  const parsed = schema.parse({
+    name: formData.get("name"),
+    type: formData.get("type") || "bank",
+    balance: formData.get("balance") || 0,
+  });
+  const db = requireDb();
+  const userId = await requireUserId();
+  await db.insert(cashAccounts).values({
+    userId,
+    name: parsed.name,
+    type: parsed.type,
+    balancePaise: parsed.balance,
+    isLiquid: true,
+  });
+  revalidateAll();
+  return { ok: true };
+}
+
+export async function createLoan(formData: FormData) {
+  const schema = z.object({
+    name: z.string().min(1),
+    principal: moneyRupeesSchema,
+    outstanding: moneyRupeesSchema,
+    ratePercent: z.coerce.number().positive(),
+    emi: moneyRupeesSchema,
+    tenureMonths: z.coerce.number().int().positive(),
+    monthsPaid: z.coerce.number().int().min(0).default(0),
+    startDate: z.string().min(1),
+    priority: z.coerce.number().int().default(100),
+  });
+  const parsed = schema.parse({
+    name: formData.get("name"),
+    principal: formData.get("principal"),
+    outstanding: formData.get("outstanding"),
+    ratePercent: formData.get("ratePercent"),
+    emi: formData.get("emi"),
+    tenureMonths: formData.get("tenureMonths"),
+    monthsPaid: formData.get("monthsPaid") || 0,
+    startDate: formData.get("startDate"),
+    priority: formData.get("priority") || 100,
+  });
+  const db = requireDb();
+  const userId = await requireUserId();
+  await db.insert(loans).values({
+    userId,
+    name: parsed.name,
+    principalPaise: parsed.principal,
+    outstandingPaise: parsed.outstanding,
+    annualRateBps: Math.round(parsed.ratePercent * 100),
+    emiPaise: parsed.emi,
+    tenureMonths: parsed.tenureMonths,
+    monthsPaid: parsed.monthsPaid,
+    startDate: parsed.startDate,
+    priority: parsed.priority,
+    status: "active",
+    extraPaymentPaise: 0,
+  });
+  revalidateAll();
+  return { ok: true };
+}
+
+export async function updateLoan(formData: FormData) {
+  const schema = z.object({
+    id: z.string().uuid(),
+    name: z.string().min(1),
+    principal: moneyRupeesSchema,
+    outstanding: moneyRupeesSchema,
+    ratePercent: z.coerce.number().positive(),
+    emi: moneyRupeesSchema,
+    tenureMonths: z.coerce.number().int().positive(),
+    monthsPaid: z.coerce.number().int().min(0).default(0),
+    startDate: z.string().min(1),
+    priority: z.coerce.number().int().default(100),
+    status: z.enum(["active", "closed"]).default("active"),
+  });
+  const parsed = schema.parse({
+    id: formData.get("id"),
+    name: formData.get("name"),
+    principal: formData.get("principal"),
+    outstanding: formData.get("outstanding"),
+    ratePercent: formData.get("ratePercent"),
+    emi: formData.get("emi"),
+    tenureMonths: formData.get("tenureMonths"),
+    monthsPaid: formData.get("monthsPaid") || 0,
+    startDate: formData.get("startDate"),
+    priority: formData.get("priority") || 100,
+    status: formData.get("status") || "active",
+  });
+  const db = requireDb();
+  const userId = await requireUserId();
+
+  const status =
+    parsed.outstanding === 0 ? ("closed" as const) : parsed.status;
+
+  const result = await db
+    .update(loans)
+    .set({
+      name: parsed.name,
+      principalPaise: parsed.principal,
+      outstandingPaise: parsed.outstanding,
+      annualRateBps: Math.round(parsed.ratePercent * 100),
+      emiPaise: parsed.emi,
+      tenureMonths: parsed.tenureMonths,
+      monthsPaid: parsed.monthsPaid,
+      startDate: parsed.startDate,
+      priority: parsed.priority,
+      status,
+    })
+    .where(and(eq(loans.id, parsed.id), eq(loans.userId, userId)))
+    .returning({ id: loans.id });
+
+  if (result.length === 0) throw new Error("Loan not found");
+
+  revalidateAll();
+  return { ok: true };
+}
+
+export async function deleteLoan(id: string) {
+  const db = requireDb();
+  const userId = await requireUserId();
+  const result = await db
+    .delete(loans)
+    .where(and(eq(loans.id, id), eq(loans.userId, userId)))
+    .returning({ id: loans.id });
+
+  if (result.length === 0) throw new Error("Loan not found");
+
   revalidateAll();
   return { ok: true };
 }
 
 export async function recordLoanPayment(formData: FormData) {
   const schema = z.object({
-    loanId: z.string(),
+    loanId: z.string().uuid(),
     amount: moneyRupeesSchema,
     isExtra: z.coerce.boolean().optional(),
     paidOn: z.string(),
@@ -123,28 +301,37 @@ export async function recordLoanPayment(formData: FormData) {
     isExtra: formData.get("isExtra") === "on" || formData.get("isExtra") === "true",
     paidOn: formData.get("paidOn"),
   });
-  const store = getStore();
-  const loan = store.loans.find((l) => l.id === parsed.loanId);
+  const db = requireDb();
+  const userId = await requireUserId();
+  const [loan] = await db
+    .select()
+    .from(loans)
+    .where(and(eq(loans.id, parsed.loanId), eq(loans.userId, userId)))
+    .limit(1);
   if (!loan) throw new Error("Loan not found");
 
   const r = monthlyRateFromBps(loan.annualRateBps);
   const interest = Math.round(loan.outstandingPaise * r);
   const principal = Math.min(loan.outstandingPaise, Math.max(0, parsed.amount - interest));
+  const newOutstanding = Math.max(0, loan.outstandingPaise - principal);
 
-  store.loanPayments.push({
-    id: newId("lp"),
+  await db.insert(loanPayments).values({
     loanId: loan.id,
     paidOn: parsed.paidOn,
     amountPaise: parsed.amount,
     principalComponentPaise: principal,
     interestComponentPaise: interest,
     isExtra: Boolean(parsed.isExtra),
-    notes: null,
   });
 
-  loan.outstandingPaise = Math.max(0, loan.outstandingPaise - principal);
-  if (!parsed.isExtra) loan.monthsPaid += 1;
-  if (loan.outstandingPaise === 0) loan.status = "closed";
+  await db
+    .update(loans)
+    .set({
+      outstandingPaise: newOutstanding,
+      monthsPaid: parsed.isExtra ? loan.monthsPaid : loan.monthsPaid + 1,
+      status: newOutstanding === 0 ? "closed" : loan.status,
+    })
+    .where(eq(loans.id, loan.id));
 
   revalidateAll();
   return { ok: true };
@@ -152,22 +339,26 @@ export async function recordLoanPayment(formData: FormData) {
 
 export async function updateLoanExtraPayment(formData: FormData) {
   const schema = z.object({
-    loanId: z.string(),
+    loanId: z.string().uuid(),
     extra: optionalMoneyRupeesSchema,
   });
   const parsed = schema.parse({
     loanId: formData.get("loanId"),
     extra: formData.get("extra") || 0,
   });
-  const loan = getStore().loans.find((l) => l.id === parsed.loanId);
-  if (loan) loan.extraPaymentPaise = parsed.extra;
+  const db = requireDb();
+  const userId = await requireUserId();
+  await db
+    .update(loans)
+    .set({ extraPaymentPaise: parsed.extra })
+    .where(and(eq(loans.id, parsed.loanId), eq(loans.userId, userId)));
   revalidateAll();
   return { ok: true };
 }
 
 export async function upsertInvestment(formData: FormData) {
   const schema = z.object({
-    id: z.string().optional(),
+    id: z.string().uuid().optional(),
     name: z.string().min(1),
     assetClass: z.enum([
       "mutual_fund",
@@ -191,21 +382,24 @@ export async function upsertInvestment(formData: FormData) {
     current: formData.get("current"),
     sipAmount: formData.get("sipAmount") || 0,
   });
-  const store = getStore();
+  const db = requireDb();
+  const userId = await requireUserId();
+
   if (parsed.id) {
-    const inv = store.investments.find((i) => i.id === parsed.id);
-    if (inv) {
-      inv.name = parsed.name;
-      inv.assetClass = parsed.assetClass;
-      inv.investedPaise = parsed.invested;
-      inv.currentValuePaise = parsed.current;
-      inv.sipAmountPaise = parsed.sipAmount || null;
-      inv.updatedAt = new Date();
-    }
+    await db
+      .update(investments)
+      .set({
+        name: parsed.name,
+        assetClass: parsed.assetClass,
+        investedPaise: parsed.invested,
+        currentValuePaise: parsed.current,
+        sipAmountPaise: parsed.sipAmount || null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(investments.id, parsed.id), eq(investments.userId, userId)));
   } else {
-    store.investments.push({
-      id: newId("inv"),
-      userId: store.user.id,
+    await db.insert(investments).values({
+      userId,
       name: parsed.name,
       assetClass: parsed.assetClass,
       investedPaise: parsed.invested,
@@ -213,8 +407,6 @@ export async function upsertInvestment(formData: FormData) {
       sipAmountPaise: parsed.sipAmount || null,
       sipDay: 5,
       assumedAnnualRatePercent: 12,
-      meta: {},
-      updatedAt: new Date(),
     });
   }
   revalidateAll();
@@ -232,22 +424,52 @@ export async function updateEmergencyFund(formData: FormData) {
     monthly: formData.get("monthly") || undefined,
     target: formData.get("target") || undefined,
   });
-  const store = getStore();
-  store.emergencyFund.currentPaise = parsed.current;
-  if (parsed.monthly) store.emergencyFund.monthlyContributionPaise = parsed.monthly;
-  if (parsed.target) store.emergencyFund.targetPaise = parsed.target;
-  store.emergencyFund.updatedAt = new Date();
+  const db = requireDb();
+  const userId = await requireUserId();
 
-  const goal = store.goals.find((g) => g.type === "emergency_fund");
-  if (goal) goal.currentPaise = parsed.current;
+  const [existing] = await db
+    .select()
+    .from(emergencyFund)
+    .where(eq(emergencyFund.userId, userId))
+    .limit(1);
+
+  if (existing) {
+    await db
+      .update(emergencyFund)
+      .set({
+        currentPaise: parsed.current,
+        monthlyContributionPaise:
+          parsed.monthly || existing.monthlyContributionPaise,
+        targetPaise: parsed.target || existing.targetPaise,
+        updatedAt: new Date(),
+      })
+      .where(eq(emergencyFund.userId, userId));
+  } else {
+    await db.insert(emergencyFund).values({
+      userId,
+      currentPaise: parsed.current,
+      targetPaise: parsed.target || 30000000,
+      phase2TargetPaise: 45000000,
+      monthlyContributionPaise: parsed.monthly || 0,
+    });
+  }
+
+  await db
+    .update(goals)
+    .set({ currentPaise: parsed.current })
+    .where(and(eq(goals.userId, userId), eq(goals.type, "emergency_fund")));
 
   revalidateAll();
   return { ok: true };
 }
 
 export async function completeReminder(id: string) {
-  const n = getStore().notifications.find((x) => x.id === id);
-  if (n) n.completedAt = new Date();
+  const db = requireDb();
+  const userId = await requireUserId();
+  await db
+    .update(notifications)
+    .set({ completedAt: new Date() })
+    .where(and(eq(notifications.id, id), eq(notifications.userId, userId)));
   revalidateAll();
   return { ok: true };
 }
@@ -263,23 +485,28 @@ export async function updateSettings(formData: FormData) {
     theme: formData.get("theme") || "dark",
     notificationsEnabled: formData.get("notificationsEnabled") === "on",
   });
-  const s = getStore().settings;
-  s.currency = parsed.currency;
-  s.theme = parsed.theme;
-  s.notificationsEnabled = Boolean(parsed.notificationsEnabled);
+  const db = requireDb();
+  const userId = await requireUserId();
+  await db
+    .update(settings)
+    .set({
+      currency: parsed.currency,
+      theme: parsed.theme,
+      notificationsEnabled: Boolean(parsed.notificationsEnabled),
+    })
+    .where(eq(settings.userId, userId));
   revalidateAll();
   return { ok: true };
 }
 
 export async function exportDataJson() {
-  const store = getStore();
-  return JSON.stringify(store, null, 2);
+  const payload = await getUserExportPayload();
+  return JSON.stringify(payload, null, 2);
 }
 
-export async function importDataJson(json: string) {
-  const data = JSON.parse(json);
-  const store = getStore();
-  Object.assign(store, data);
-  revalidateAll();
-  return { ok: true };
+export async function importDataJson(_json: string) {
+  // Import into multi-user Neon is intentionally limited — use UI forms instead.
+  throw new Error(
+    "JSON import is disabled in multi-user mode. Add data via the app forms."
+  );
 }

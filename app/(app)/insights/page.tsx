@@ -2,7 +2,6 @@ import { Topbar } from "@/components/layout/topbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getDashboardSummary } from "@/features/dashboard/queries";
-import { isDemoMode } from "@/lib/demo-flag";
 
 export const metadata = { title: "Insights" };
 
@@ -13,12 +12,12 @@ const severityVariant = {
   critical: "danger",
 } as const;
 
-export default function InsightsPage() {
-  const { insights } = getDashboardSummary();
+export default async function InsightsPage() {
+  const { insights } = await getDashboardSummary();
 
   return (
     <>
-      <Topbar title="Insights" demo={isDemoMode()} />
+      <Topbar title="Insights" />
       <div className="space-y-4 p-4 md:p-6">
         <p className="text-sm text-muted-foreground">
           Generated from your salary, expenses, loans, emergency fund and investments.
