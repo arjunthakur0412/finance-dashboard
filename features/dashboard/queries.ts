@@ -117,9 +117,16 @@ export async function getDashboardSummary(month = monthKey()) {
   const liquidCash = accounts.filter((a) => a.isLiquid).reduce((s, a) => s + a.balancePaise, 0);
   const investmentValue = investmentRows.reduce((s, i) => s + i.currentValuePaise, 0);
   const investmentInvested = investmentRows.reduce((s, i) => s + i.investedPaise, 0);
-  const activeLoans = loanRows.filter((l) => l.status === "active");
+  const activeLoans = loanRows
+    .filter((l) => l.status === "active")
+    .sort((a, b) => a.priority - b.priority);
   const loansOutstanding = activeLoans.reduce((s, l) => s + l.outstandingPaise, 0);
   const totalEmi = activeLoans.reduce((s, l) => s + l.emiPaise, 0);
+  const loanEmis = activeLoans.map((l) => ({
+    id: l.id,
+    name: l.name,
+    emiPaise: l.emiPaise,
+  }));
   const ef = efRows[0] || emptyEmergency(userId);
   const assets = liquidCash + investmentValue + ef.currentPaise;
   const netWorth = assets - loansOutstanding;
@@ -146,9 +153,14 @@ export async function getDashboardSummary(month = monthKey()) {
   const sipPaise = investmentRows.reduce((s, i) => s + (i.sipAmountPaise || 0), 0);
   const homeRule = recurring.find((r) => r.label === "Home Contribution");
   const homePaise = homeRule?.amountPaise || 0;
-  const savings = income - expensesTotal;
-  const sr = savingsRateBps(income, expensesTotal);
-  const prevSr = savingsRateBps(prevIncome, prevExpensesTotal);
+
+  // Cash flow = income − logged expenses − scheduled EMI − SIP.
+  // Home contribution counts only when logged as an expense (avoids double-count).
+  const monthlyOutflow = expensesTotal + totalEmi + sipPaise;
+  const prevMonthlyOutflow = prevExpensesTotal + totalEmi + sipPaise;
+  const cashFlowPaise = income - monthlyOutflow;
+  const sr = savingsRateBps(income, monthlyOutflow);
+  const prevSr = savingsRateBps(prevIncome, prevMonthlyOutflow);
   const efProgress = ef.targetPaise > 0 ? ef.currentPaise / ef.targetPaise : 0;
 
   const activeGoals = goalRows.filter((g) => g.status === "active");
@@ -168,7 +180,7 @@ export async function getDashboardSummary(month = monthKey()) {
   const healthScore = hasAnyData
     ? calculateHealthScore({
         emergencyProgress: efProgress,
-        savingsRate: income > 0 ? savings / income : 0,
+        savingsRate: income > 0 ? cashFlowPaise / income : 0,
         debtToIncome: income > 0 ? (totalEmi + homePaise) / income : 0,
         investmentRate: income > 0 ? sipPaise / income : 0,
         expenseRatio: income > 0 ? expensesTotal / income : 0,
@@ -188,7 +200,9 @@ export async function getDashboardSummary(month = monthKey()) {
   const cashFlow = [
     { label: "Income", value: income },
     { label: "Expenses", value: expensesTotal },
-    { label: "Savings", value: Math.max(0, savings) },
+    { label: "EMI", value: totalEmi },
+    { label: "SIP", value: sipPaise },
+    { label: "Left", value: Math.max(0, cashFlowPaise) },
   ];
 
   const incomeGrowth =
@@ -232,7 +246,8 @@ export async function getDashboardSummary(month = monthKey()) {
     investmentValue,
     loansOutstanding,
     savingsRateBps: sr,
-    cashFlowPaise: savings,
+    cashFlowPaise,
+    monthlyOutflow,
     burnRate,
     healthScore,
     incomeGrowth,
@@ -241,6 +256,7 @@ export async function getDashboardSummary(month = monthKey()) {
     insights,
     goalsPreview,
     totalEmi,
+    loanEmis,
     sipPaise,
     homePaise,
     assets,

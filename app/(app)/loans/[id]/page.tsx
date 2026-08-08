@@ -81,8 +81,16 @@ export default async function LoanDetailPage({
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">
-              Payoff projection · ~{remaining} months remaining
+              Payoff projection · ~{remaining} months at current EMI
             </CardTitle>
+            <p className="text-xs font-normal text-muted-foreground">
+              Calculated from outstanding balance + interest rate + EMI (not simply tenure − months
+              paid). Contract record: {loan.monthsPaid}/{loan.tenureMonths} months paid
+              {loan.tenureMonths - loan.monthsPaid !== remaining
+                ? ` · ${loan.tenureMonths - loan.monthsPaid} left on original tenure`
+                : ""}
+              .
+            </p>
           </CardHeader>
           <CardContent>
             <MoneyAreaChart data={projection} color="#fbbf24" />

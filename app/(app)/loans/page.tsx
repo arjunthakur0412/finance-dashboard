@@ -66,8 +66,11 @@ export default async function LoansPage() {
                       <div className="flex justify-between text-xs text-muted-foreground">
                         <span>
                           {loan.monthsPaid}/{loan.tenureMonths} months paid
+                          {loan.tenureMonths - loan.monthsPaid >= 0
+                            ? ` · ${loan.tenureMonths - loan.monthsPaid} on contract`
+                            : ""}
                         </span>
-                        <span>~{remaining} months left</span>
+                        <span>~{remaining} mo payoff at EMI</span>
                       </div>
                     </CardContent>
                   </Card>

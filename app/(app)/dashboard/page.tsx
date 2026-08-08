@@ -3,12 +3,12 @@ import {
   Banknote,
   Flame,
   Landmark,
-  PiggyBank,
   Shield,
   TrendingUp,
   Wallet,
   Activity,
   ArrowRight,
+  CreditCard,
 } from "lucide-react";
 import { Topbar } from "@/components/layout/topbar";
 import { MetricCard, ScoreCard } from "@/components/feedback/metric-card";
@@ -81,13 +81,39 @@ export default async function DashboardPage() {
               icon={Banknote}
               formatCompact
             />
-            <MetricCard
-              title="Remaining Cash"
-              valuePaise={s.remainingCash}
-              icon={PiggyBank}
-              formatCompact
-              subtitle="Liquid accounts"
-            />
+            <Card className="overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Monthly EMI
+                </CardTitle>
+                <CreditCard className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <div className="text-2xl font-semibold tracking-tight">
+                    {formatINR(s.totalEmi, { compact: true })}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Combined obligation · {s.loanEmis.length} active loan
+                    {s.loanEmis.length === 1 ? "" : "s"}
+                  </p>
+                </div>
+                {s.loanEmis.length > 0 ? (
+                  <div className="space-y-1.5 border-t border-border/50 pt-3">
+                    {s.loanEmis.map((loan) => (
+                      <div key={loan.id} className="flex items-center justify-between text-xs">
+                        <span className="truncate text-muted-foreground">{loan.name}</span>
+                        <span className="font-medium tabular-nums">
+                          {formatINR(loan.emiPaise)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No active loans</p>
+                )}
+              </CardContent>
+            </Card>
             <MetricCard title="Net Worth" valuePaise={s.netWorth} icon={Activity} formatCompact />
             <MetricCard
               title="Investment Value"
@@ -106,9 +132,10 @@ export default async function DashboardPage() {
               valuePaise={s.cashFlowPaise}
               icon={Wallet}
               formatCompact
+              subtitle="After expenses, EMI & SIP"
               trend={{
                 label: `Savings rate ${formatPercent(s.savingsRateBps)}`,
-                positive: s.savingsRateBps > 0,
+                positive: s.cashFlowPaise > 0,
               }}
             />
             <MetricCard
@@ -161,8 +188,7 @@ export default async function DashboardPage() {
                   {formatPercent(s.savingsRateBps)}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  SIP {formatINR(s.sipPaise)} · Home {formatINR(s.homePaise)} · EMI{" "}
-                  {formatINR(s.totalEmi)}
+                  After expenses, EMI ({formatINR(s.totalEmi)}) & SIP ({formatINR(s.sipPaise)})
                 </p>
               </CardContent>
             </Card>
@@ -172,6 +198,9 @@ export default async function DashboardPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">This Month Cash Flow</CardTitle>
+                <p className="text-xs font-normal text-muted-foreground">
+                  Income minus expenses, EMI, and SIP
+                </p>
               </CardHeader>
               <CardContent>
                 <MoneyBarChart data={s.cashFlow} />
